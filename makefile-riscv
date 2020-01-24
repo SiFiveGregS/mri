@@ -69,11 +69,11 @@ else
 endif
 
 # Flags to use when cross-compiling RISCV binaries.
-RISCV_GCCFLAGS := -Os -g3 -mcpu=cortex-m3 -mthumb -mthumb-interwork -Wall -Wextra -Werror -Wno-unused-parameter -MMD -MP
+RISCV_GCCFLAGS := -Os -g3 -Wall -Wextra -Werror -Wno-unused-parameter -MMD -MP
 RISCV_GCCFLAGS += -ffunction-sections -fdata-sections -fno-exceptions -fno-delete-null-pointer-checks -fomit-frame-pointer
 RISCV_GPPFLAGS := $(RISCV_GCCFLAGS) -fno-rtti
 RISCV_GCCFLAGS += -std=gnu90
-RISCV_ASFLAGS  := -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -mthumb -g3 -x assembler-with-cpp -MMD -MP
+RISCV_ASFLAGS  := -g3 -x assembler-with-cpp -MMD -MP
 
 # Flags to use when compiling binaries to run on this host system.
 HOST_GCCFLAGS := -O2 -g3 -Wall -Wextra -Werror -Wno-unused-parameter -MMD -MP
@@ -153,7 +153,6 @@ define run_gcov
 		$Q cat gcov/$1_tests/$1.txt
 endef
 define make_library # ,LIBRARY,src_dirs,libname.a,includes
-    $(info arg1 is $1, RISCV_CORE_OBJ is $(RISCV_CORE_OBJ))
     HOST_$1_OBJ      := $(foreach i,$2,$(call host_objs,$i))
     GCOV_HOST_$1_OBJ := $(foreach i,$2,$(call gcov_host_objs,$i))
     HOST_$1_LIB      := $(HOST_LIBDIR)/$3
@@ -204,7 +203,6 @@ endef
 
 # MRI Core sources to build and test.
 RISCV_CORE_OBJ    := $(call riscv_objs,core)
-$(info $(RISCV_CORE_OBJ))
 $(eval $(call make_library,CORE,core memory/native,libmricore.a,include))
 #$(eval $(call make_tests,CORE,tests/tests tests/mocks,include tests/mocks,))
 #$(eval $(call run_gcov,CORE))
@@ -251,6 +249,11 @@ $(eval $(call riscv_module,NATIVE_MEM,memory/native))
 # $(eval $(call make_board_library,STM32F429_DISCO,boards/stm32f429-disco,libmri_stm32f429-disco.a,\
 #                                  CORE SEMIHOST RISCV_FPU NATIVE_MEM STM32F429XX,\
 #                                  boards/stm32f429-disco devices/stm32f429xx architecture/armv7-m cmsis/STM32F429xx))
+
+$(eval $(call make_board_library,MBED1768,boards/riscv-sifive-freedom-metal,libmri_freedom_metal.a,\
+                                 CORE RISCV NATIVE_MEM,\
+                                 boards/riscv-sifive-freedom-metal architecture/riscv))
+
 
 # All boards to be built for RISC-V target.
 RISCV_BOARDS : $(RISCV_BOARD_LIBS)

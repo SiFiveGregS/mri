@@ -24,6 +24,9 @@ endif
 
 riscv : RISCV_BOARDS
 
+riscv_test_link:
+	$(RISCV_GCC) -I include architectures/riscv/test_link.c -L lib/riscv -lmri_freedom_metal
+
 host : RUN_CPPUTEST_TESTS RUN_CORE_TESTS
 
 all : riscv # host

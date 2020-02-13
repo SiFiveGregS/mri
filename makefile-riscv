@@ -25,7 +25,7 @@ endif
 riscv : RISCV_BOARDS
 
 riscv_test_link:
-	$(RISCV_GCC) -I include architectures/riscv/test_link.c -L lib/riscv -lmri_freedom_metal
+	$(RISCV_GCC) -I include architectures/riscv/test_link.c -L lib/riscv -lmri-riscv
 
 host : RUN_CPPUTEST_TESTS RUN_CORE_TESTS
 
@@ -253,7 +253,7 @@ $(eval $(call riscv_module,NATIVE_MEM,memory/native))
 #                                  CORE SEMIHOST RISCV_FPU NATIVE_MEM STM32F429XX,\
 #                                  boards/stm32f429-disco devices/stm32f429xx architecture/armv7-m cmsis/STM32F429xx))
 
-$(eval $(call make_board_library,MBED1768,boards/riscv-sifive-freedom-metal,libmri_freedom_metal.a,\
+$(eval $(call make_board_library,MBED1768,boards/riscv-sifive-freedom-metal,libmri-riscv.a,\
                                  CORE RISCV NATIVE_MEM,\
                                  boards/riscv-sifive-freedom-metal architecture/riscv))
 

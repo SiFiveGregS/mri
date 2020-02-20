@@ -72,11 +72,15 @@ else
 endif
 
 # Flags to use when cross-compiling RISCV binaries.
+RISCV_ARCHFLAGS := -march=rv32i -mabi=ilp32
+
 RISCV_GCCFLAGS := -Os -g3 -Wall -Wextra -Werror -Wno-unused-parameter -MMD -MP
 RISCV_GCCFLAGS += -ffunction-sections -fdata-sections -fno-exceptions -fno-delete-null-pointer-checks -fomit-frame-pointer
+RISCV_GCCFLAGS += $(RISCV_ARCHFLAGS)
 RISCV_GPPFLAGS := $(RISCV_GCCFLAGS) -fno-rtti
 RISCV_GCCFLAGS += -std=gnu90
 RISCV_ASFLAGS  := -g3 -x assembler-with-cpp -MMD -MP
+RISCV_ASFLAGS += $(RISCV_ARCHFLAGS)
 
 # Flags to use when compiling binaries to run on this host system.
 HOST_GCCFLAGS := -O2 -g3 -Wall -Wextra -Werror -Wno-unused-parameter -MMD -MP

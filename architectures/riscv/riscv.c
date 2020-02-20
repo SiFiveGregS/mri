@@ -994,6 +994,23 @@ static void clearHardwareBreakpointOnSvcHandler(void)
 #endif  
 }
 
+/* From mri.c:
+   These two routines can be provided by the debuggee to get notified on debugger entry/exit.  Can be used to safely
+   turn off some external hardware so that it doesn't keep running while sitting at a breakpoint.
+void __mriPlatform_EnteringDebuggerHook(void) __attribute__((weak));
+void __mriPlatform_LeavingDebuggerHook(void) __attribute__((weak));
+*/
+
+void __mriPlatform_EnteringDebuggerHook(void)
+{
+
+}
+
+void __mriPlatform_LeavingDebuggerHook(void)
+{
+
+}
+
 
 static void restoreMPUConfiguration(void);
 static void checkStack(void);

@@ -259,7 +259,7 @@ $(eval $(call riscv_module,NATIVE_MEM,memory/native))
 
 $(eval $(call make_board_library,MBED1768,boards/riscv-sifive-freedom-metal,libmri-riscv.a,\
                                  CORE RISCV NATIVE_MEM,\
-                                 boards/riscv-sifive-freedom-metal architecture/riscv))
+                                 architecture/riscv))
 
 
 # All boards to be built for RISC-V target.

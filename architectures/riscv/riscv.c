@@ -22,6 +22,7 @@
 #include <signal.h>
 #include <platforms.h>
 #include <gdb_console.h>
+#include "riscv.h"
 
 #define DISABLE_APPARENTLY_ARM_SPECIFIC_CODE 1
 
@@ -34,6 +35,8 @@
 /* Disable any macro used for errno and use the int global instead. */
 #undef errno
 extern int errno;
+
+RiscVState    __mriRiscVState;
 
 
 /* NOTE: This is the original version of the following XML which has had things stripped to reduce the amount of
@@ -559,21 +562,13 @@ int Platform_IsSingleStepping(void)
 
 char* Platform_GetPacketBuffer(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return __mriCortexMState.packetBuffer;  
-#else
-    return NULL; // implement for RISC-V    
-#endif  
+    return __mriRiscVState.packetBuffer;
 }
 
 
 uint32_t Platform_GetPacketBufferSize(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return sizeof(__mriCortexMState.packetBuffer);  
-#else
-    return 0;  // implement for RISC-V
-#endif  
+    return sizeof(__mriRiscVState.packetBuffer);    
 }
 
 

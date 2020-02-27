@@ -139,8 +139,8 @@ static void enableDebugMonitorAtPriority0(void);
 static void disableSingleStep(void);
 static void enableSingleStep(void);
 static uint32_t getCurrentlyExecutingExceptionNumber(void);
-static void disableMPU(void);
-static void enableMPUWithHardAndNMIFaults(void);
+
+
 
 #ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
 static void enableMPU(void);
@@ -163,10 +163,6 @@ void __mriRiscVInit(Token* pParameterTokens)
 }
 
 
-static void disableMPU(void)
-{
-    // RESOLVE - implement for RISC-V
-}
 
 #ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
 static void enableMPU(void)
@@ -174,10 +170,6 @@ static void enableMPU(void)
 }
 #endif
 
-static void enableMPUWithHardAndNMIFaults(void)
-{
-    // RESOLVE - implement for RISC-V
-}
 
 static __INLINE int isMPUNotPresent(void)
 {
@@ -844,16 +836,11 @@ static void displayUsageFaultCauseToGdbConsole(void)
 }
 
 
-static void     clearMemoryFaultFlag(void);
-static void     configureMpuToAccessAllMemoryWithNoCaching(void);
-static void     saveOriginalMpuConfiguration(void);
-static void     configureHighestMpuRegionToAccessAllMemoryWithNoCaching(void);
-static void     cleanupIfSingleStepping(void);
-static void     removeHardwareBreakpointOnSvcHandlerIfNeeded(void);
-static int      shouldRemoveHardwareBreakpointOnSvcHandler(void);
-static void     clearSvcStepFlag(void);
-static void     clearHardwareBreakpointOnSvcHandler(void);
-static void     restoreBasePriorityIfNeeded(void);
+
+
+
+
+
 
 
 #ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
@@ -861,80 +848,13 @@ static void     clearRestoreBasePriorityFlag(void);
 static uint32_t shouldRestoreBasePriority(void);
 #endif
 
-void Platform_EnteringDebugger(void)
-{
-    clearMemoryFaultFlag();
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.originalPC = __mriCortexMState.context.PC;    
-#else
-#endif  
-    configureMpuToAccessAllMemoryWithNoCaching();
-    cleanupIfSingleStepping();
-}
-
-static void clearMemoryFaultFlag(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.flags &= ~CORTEXM_FLAGS_FAULT_DURING_DEBUG;
-#else
-#endif  
-}
-
-static void configureMpuToAccessAllMemoryWithNoCaching(void)
-{
-    saveOriginalMpuConfiguration();
-    disableMPU();
-    configureHighestMpuRegionToAccessAllMemoryWithNoCaching();    
-    enableMPUWithHardAndNMIFaults();
-}
-
-static void saveOriginalMpuConfiguration(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.originalMPUControlValue = getMPUControlValue();
-    __mriCortexMState.originalMPURegionNumber = getCurrentMPURegionNumber();
-    prepareToAccessMPURegion(getHighestMPUDataRegionIndex());
-    __mriCortexMState.originalMPURegionAddress = getMPURegionAddress();
-    __mriCortexMState.originalMPURegionAttributesAndSize = getMPURegionAttributeAndSize();
-#else
-#endif  
-}
-
-static void configureHighestMpuRegionToAccessAllMemoryWithNoCaching(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    static const uint32_t regionToStartAtAddress0 = 0U;
-    static const uint32_t regionReadWrite = 1  << MPU_RASR_AP_SHIFT;
-    static const uint32_t regionSizeAt4GB = 31 << MPU_RASR_SIZE_SHIFT; /* 4GB = 2^(31+1) */
-    static const uint32_t regionEnable    = MPU_RASR_ENABLE;
-    static const uint32_t regionSizeAndAttributes = regionReadWrite | regionSizeAt4GB | regionEnable;
-    
-    prepareToAccessMPURegion(getHighestMPUDataRegionIndex());
-    setMPURegionAddress(regionToStartAtAddress0);
-    setMPURegionAttributeAndSize(regionSizeAndAttributes);
-#else
-#endif  
-}
-
-static void cleanupIfSingleStepping(void)
-{
-    restoreBasePriorityIfNeeded();
-    removeHardwareBreakpointOnSvcHandlerIfNeeded();
-    Platform_DisableSingleStep();
-}
 
 
-static void restoreBasePriorityIfNeeded(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE  
-    if (shouldRestoreBasePriority())
-    {
-        clearRestoreBasePriorityFlag();
-        __set_BASEPRI(__mriCortexMState.originalBasePriority);
-        __mriCortexMState.originalBasePriority = 0;
-    }
-#endif    
-}
+
+
+
+
+
 
 
 #ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE  
@@ -955,39 +875,8 @@ static void clearRestoreBasePriorityFlag(void)
 }
 #endif
 
-static void removeHardwareBreakpointOnSvcHandlerIfNeeded(void)
-{
-    if (shouldRemoveHardwareBreakpointOnSvcHandler())
-    {
-        clearSvcStepFlag();
-        clearHardwareBreakpointOnSvcHandler();
-    }
-}
 
-static int shouldRemoveHardwareBreakpointOnSvcHandler(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return __mriCortexMState.flags & CORTEXM_FLAGS_SVC_STEP;  
-#else
-    return 0;  /* implement, if needed for RISC-V */    
-#endif  
-}
 
-static void clearSvcStepFlag(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.flags &= ~CORTEXM_FLAGS_SVC_STEP;
-#else
-#endif  
-}
-
-static void clearHardwareBreakpointOnSvcHandler(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    Platform_ClearHardwareBreakpoint(getNvicVector(SVCall_IRQn) & ~1, 2);
-#else
-#endif  
-}
 
 /* From mri.c:
    These two routines can be provided by the debuggee to get notified on debugger entry/exit.  Can be used to safely
@@ -1209,20 +1098,6 @@ void Platform_SetSemihostCallReturnAndErrnoValues(int returnValue, int err)
 }
 
 
-int Platform_WasMemoryFaultEncountered(void)
-{
-    int wasFaultEncountered;
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE    
-    __DSB();
-    wasFaultEncountered = __mriCortexMState.flags & CORTEXM_FLAGS_FAULT_DURING_DEBUG;
-#else
-    wasFaultEncountered = 0; // implement for RISC-V
-#endif    
-    clearMemoryFaultFlag();
-    
-    return wasFaultEncountered;    
-}
 
 #ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
 static void sendRegisterForTResponse(Buffer* pBuffer, uint8_t registerOffset, uint32_t registerValue);

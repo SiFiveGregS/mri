@@ -18,7 +18,8 @@ typedef struct
 
 /* NOTE: The largest buffer is required for receiving the 'G' command which receives the contents of the registers from 
    the debugger as two hex digits per byte.  Also need a character for the 'G' command itself. */
-#define RISCV_PACKET_BUFFER_SIZE (1 + 2 * sizeof(RiscV_Context))
+/* BUT, for RISC-V we don't know yet what the context is going to look like so let's just say 1024, for now */
+#define RISCV_PACKET_BUFFER_SIZE 1024
 
 typedef struct
 {

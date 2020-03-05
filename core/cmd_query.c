@@ -73,7 +73,10 @@ uint32_t HandleQueryCommand(void)
 */
 static uint32_t handleQuerySupportedCommand(void)
 {
-    static const char querySupportResponse[] = "qXfer:memory-map:read+;qXfer:features:read+;PacketSize=";
+  // static const char querySupportResponse[] = "qXfer:memory-map:read+;qXfer:features:read+;PacketSize=";
+  static const char querySupportResponse[] = "PacketSize=";  /* For RISC-V, temporarily not advertising that the stub supports qXfer
+								memory map reading or features reading.  Will try to reenable that
+								at some point */
     uint32_t          PacketSize = Platform_GetPacketBufferSize();
     Buffer*           pBuffer = GetInitializedBuffer();
 

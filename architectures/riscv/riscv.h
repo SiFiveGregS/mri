@@ -1,20 +1,32 @@
+#include "token.h"
+#include <stdint.h>
+
+#if __riscv_xlen == 32
+typedef uint32_t RISCV_X_VAL;
+#else
+typedef uint64_t RISCV_X_VAL;
+#endif
+
+/* Important!  Do not modify this structure layout without making corresponding changes to
+   the assembly code referred to by the label "mri_context" */
+typedef struct {
+  RISCV_X_VAL flags;
+  RISCV_X_VAL x_1_31[31];  // Not including x0!  Its value is fixed at zero always, of course.
+  RISCV_X_VAL mepc;
+  RISCV_X_VAL mcause;
+  RISCV_X_VAL mstatus;  
+  RISCV_X_VAL reentered;  
+  RISCV_X_VAL reentered_mepc;
+  RISCV_X_VAL reentered_mcause;
+  RISCV_X_VAL reentered_mstatus;  
+} MRI_CONTEXT_RISCV;
+
+
 /* NOTE: The MriExceptionHandler function definition is dependent on the layout of this structure.  It
          is also dictated by the version of gdb which supports the RISC-V processors.  It should only be changed if the
          gdb RISC-V support code is modified and then the context saving and restoring code will need to be modified to
          use the correct offsets as well.
 */
-
-#if __riscv_xlen == 32
-typedef uint32_t riscv_xreg_t;
-#elif __riscv_xlen == 64
-typedef uint64_t riscv_xreg_t;
-#endif
-
-
-typedef struct
-{
-  riscv_xreg_t x0;
-} RiscV_Context;
 
 /* NOTE: The largest buffer is required for receiving the 'G' command which receives the contents of the registers from 
    the debugger as two hex digits per byte.  Also need a character for the 'G' command itself. */
@@ -35,7 +47,7 @@ typedef struct
     uint32_t            originalMPURegionAttributesAndSize;
     uint32_t            originalBasePriority;
     int                 maxStackUsed;
-#endif  
+#endif
     char                packetBuffer[RISCV_PACKET_BUFFER_SIZE];
 } RiscVState;
 

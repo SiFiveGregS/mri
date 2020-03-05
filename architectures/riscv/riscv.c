@@ -36,6 +36,7 @@
 #undef errno
 extern int errno;
 
+MRI_CONTEXT_RISCV mri_context;
 RiscVState    __mriRiscVState;
 
 
@@ -938,20 +939,14 @@ static void checkStack(void)
 
 uint32_t Platform_GetProgramCounter(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return __mriCortexMState.context.PC;  
-#else
-    return 0; // implement for RISC-V
-#endif  
+    return mri_context.mepc;
 }
 
 
 void Platform_SetProgramCounter(uint32_t newPC)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.context.PC = newPC;  
-#else
-#endif  
+    // This interface will need attention in order to support RV64
+    mri_context.mepc = newPC;
 }
 
 
@@ -1125,6 +1120,8 @@ static void sendRegisterForTResponse(Buffer* pBuffer, uint8_t registerOffset, ui
     Buffer_WriteChar(pBuffer, ';');
 }
 
+#endif
+
 static void writeBytesToBufferAsHex(Buffer* pBuffer, void* pBytes, size_t byteCount)
 {
     uint8_t* pByte = (uint8_t*)pBytes;
@@ -1133,16 +1130,18 @@ static void writeBytesToBufferAsHex(Buffer* pBuffer, void* pBytes, size_t byteCo
     for (i = 0 ; i < byteCount ; i++)
         Buffer_WriteByteAsHex(pBuffer, *pByte++);
 }
-#endif
+
 
 
 void Platform_CopyContextToBuffer(Buffer* pBuffer)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    writeBytesToBufferAsHex(pBuffer, &__mriCortexMState.context, sizeof(__mriCortexMState.context));  
-#else
-    // implement for RISC-V
-#endif  
+    /* x0 isn't part of the context structure, so fake that one */
+    RISCV_X_VAL zero = 0;
+    writeBytesToBufferAsHex(pBuffer, &zero, sizeof(zero));
+    /* x1 through x31 are from context structure */
+    writeBytesToBufferAsHex(pBuffer, &mri_context.x_1_31, sizeof(mri_context.x_1_31));
+    /* pc (this is the captured MEPC value) */
+    writeBytesToBufferAsHex(pBuffer, &mri_context.mepc, sizeof(mri_context.mepc));    
 }
 
 #ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE

@@ -10,13 +10,11 @@ typedef uint64_t RISCV_X_VAL;
 /* Important!  Do not modify this structure layout without making corresponding changes to
    the assembly code referred to by the label "mri_context" */
 
-#define MRI_CONTEXT_FLAG_VALID (1 << 0)      /* Does the context struct have valid data? 1=yes, 0=no */
-#define MRI_CONTEXT_FLAG_EXITING (1 << 1)    /* Is the debugger exiting back to the state prior to initial debugger entry? */
-#define MRI_CONTEXT_FLAG_MEM_FAULT (1 << 2)  /* Has a memory fault been encountered while in the debugger? */
-#define MRI_CONTEXT_FLAG_REENTERED (1 << 3)  /* Has the debugger been re-entered (and thus, are the reentered_* fields valid? */
+#define MRI_RISCV_FLAG_DEBUGGER_ACTIVE (1 << 0)      /* Is the debugger in control? 1=yes, 0=no */
+#define MRI_RISCV_FLAG_EXITING (1 << 1)    /* Is the debugger exiting back to the state prior to initial debugger entry? */
+#define MRI_RISCV_FLAG_REENTERED (1 << 2)  /* Has the debugger been re-entered (and thus, are the reentered_* fields valid? */
 
 typedef struct {
-  RISCV_X_VAL flags;
   RISCV_X_VAL x_1_31[31];  // Not including x0!  Its value is fixed at zero always, of course.
   RISCV_X_VAL mepc;
   RISCV_X_VAL mcause;
@@ -40,19 +38,7 @@ typedef struct {
 
 typedef struct
 {
-#if 0  // this stuff was copied directly from ARM-support code; may or may not turn out to be applicable for RISC-V
-    uint64_t            debuggerStack[CORTEXM_DEBUGGER_STACK_SIZE];
     volatile uint32_t   flags;
-    volatile uint32_t   taskSP;
-    Context             context;
-    uint32_t            originalPC;
-    uint32_t            originalMPUControlValue;
-    uint32_t            originalMPURegionNumber;
-    uint32_t            originalMPURegionAddress;
-    uint32_t            originalMPURegionAttributesAndSize;
-    uint32_t            originalBasePriority;
-    int                 maxStackUsed;
-#endif
     MRI_CONTEXT_RISCV   context;
     char                packetBuffer[RISCV_PACKET_BUFFER_SIZE];
 } RiscVState;

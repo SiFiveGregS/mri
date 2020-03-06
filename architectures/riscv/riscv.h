@@ -9,13 +9,18 @@ typedef uint64_t RISCV_X_VAL;
 
 /* Important!  Do not modify this structure layout without making corresponding changes to
    the assembly code referred to by the label "mri_context" */
+
+#define MRI_CONTEXT_FLAG_VALID (1 << 0)      /* Does the context struct have valid data? 1=yes, 0=no */
+#define MRI_CONTEXT_FLAG_EXITING (1 << 1)    /* Is the debugger exiting back to the state prior to initial debugger entry? */
+#define MRI_CONTEXT_FLAG_MEM_FAULT (1 << 2)  /* Has a memory fault been encountered while in the debugger? */
+#define MRI_CONTEXT_FLAG_REENTERED (1 << 3)  /* Has the debugger been re-entered (and thus, are the reentered_* fields valid? */
+
 typedef struct {
   RISCV_X_VAL flags;
   RISCV_X_VAL x_1_31[31];  // Not including x0!  Its value is fixed at zero always, of course.
   RISCV_X_VAL mepc;
   RISCV_X_VAL mcause;
   RISCV_X_VAL mstatus;  
-  RISCV_X_VAL reentered;  
   RISCV_X_VAL reentered_mepc;
   RISCV_X_VAL reentered_mcause;
   RISCV_X_VAL reentered_mstatus;  

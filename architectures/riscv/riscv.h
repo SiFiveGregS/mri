@@ -53,6 +53,7 @@ typedef struct
     uint32_t            originalBasePriority;
     int                 maxStackUsed;
 #endif
+    MRI_CONTEXT_RISCV   context;
     char                packetBuffer[RISCV_PACKET_BUFFER_SIZE];
 } RiscVState;
 

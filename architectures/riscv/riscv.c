@@ -36,7 +36,6 @@
 #undef errno
 extern int errno;
 
-MRI_CONTEXT_RISCV mri_context;
 RiscVState    __mriRiscVState;
 
 
@@ -939,14 +938,14 @@ static void checkStack(void)
 
 uint32_t Platform_GetProgramCounter(void)
 {
-    return mri_context.mepc;
+    return __mriRiscVState.context.mepc;
 }
 
 
 void Platform_SetProgramCounter(uint32_t newPC)
 {
     // This interface will need attention in order to support RV64
-    mri_context.mepc = newPC;
+    __mriRiscVState.context.mepc = newPC;
 }
 
 
@@ -1139,9 +1138,9 @@ void Platform_CopyContextToBuffer(Buffer* pBuffer)
     RISCV_X_VAL zero = 0;
     writeBytesToBufferAsHex(pBuffer, &zero, sizeof(zero));
     /* x1 through x31 are from context structure */
-    writeBytesToBufferAsHex(pBuffer, &mri_context.x_1_31, sizeof(mri_context.x_1_31));
+    writeBytesToBufferAsHex(pBuffer, &__mriRiscVState.context.x_1_31, sizeof(__mriRiscVState.context.x_1_31));
     /* pc (this is the captured MEPC value) */
-    writeBytesToBufferAsHex(pBuffer, &mri_context.mepc, sizeof(mri_context.mepc));    
+    writeBytesToBufferAsHex(pBuffer, &__mriRiscVState.context.mepc, sizeof(__mriRiscVState.context.mepc));    
 }
 
 #ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE

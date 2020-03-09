@@ -903,6 +903,7 @@ void Platform_LeavingDebugger(void)
     restoreMPUConfiguration();
     checkStack();
     clearMonitorPending();
+    __mriRiscVState.flags |= MRI_RISCV_FLAG_EXITING;
 }
 
 static void restoreMPUConfiguration(void)

@@ -180,8 +180,7 @@ static __INLINE int isMPUNotPresent(void)
 
 static uint32_t getCurrentlyExecutingExceptionNumber(void)
 {
-    // RESOLVE - implement for RISC-V
-  return 0;
+  return __mriRiscVState.context.mcause;
 }
 
 static void clearState(void)
@@ -564,36 +563,17 @@ uint32_t Platform_GetPacketBufferSize(void)
 }
 
 
-static uint8_t  determineCauseOfDebugEvent(void);
 uint8_t Platform_DetermineCauseOfException(void)
 {
     uint32_t exceptionNumber = getCurrentlyExecutingExceptionNumber();
     
     switch(exceptionNumber)
     {
-    case 2:
-        /* NMI */
-        return SIGINT;
-    case 3:
-        /* HardFault */
-        return SIGSEGV;
-    case 4:
-        /* MemManage */
-        return SIGSEGV;
-    case 5:
-        /* BusFault */
-        return SIGBUS;
-    case 6:
-        /* UsageFault */
-        return SIGILL;
-    case 12:
-        /* Debug Monitor */
-        return determineCauseOfDebugEvent();
-    case 21:
-    case 22:
-    case 23:
-    case 24:
-        /* UART* */
+    case 0x3:
+        /* Breakpoint exception */
+        return SIGTRAP;
+    case 0x8000000B:
+        /* External interrupt (machine mode)... should be UART in our case (otherwise we're getting interrupts we didn't ask for) */
         return SIGINT;
     default:
         /* NOTE: Catch all signal will be SIGSTOP. */
@@ -601,40 +581,6 @@ uint8_t Platform_DetermineCauseOfException(void)
     }
 }
 
-static uint8_t determineCauseOfDebugEvent(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    static struct
-    {
-        uint32_t        statusBit;
-        unsigned char   signalToReturn;
-    } const debugEventToSignalMap[] =
-    {
-        {SCB_DFSR_EXTERNAL, SIGSTOP},
-        {SCB_DFSR_DWTTRAP, SIGTRAP},
-        {SCB_DFSR_BKPT, SIGTRAP},
-        {SCB_DFSR_HALTED, SIGTRAP}
-    };
-    uint32_t debugFaultStatus = SCB->DFSR;
-    size_t   i;
-    
-    for (i = 0 ; i < sizeof(debugEventToSignalMap)/sizeof(debugEventToSignalMap[0]) ; i++)
-    {
-        if (debugFaultStatus & debugEventToSignalMap[i].statusBit)
-        {
-            SCB->DFSR = debugEventToSignalMap[i].statusBit;
-            return debugEventToSignalMap[i].signalToReturn;
-        }
-    }
-    
-    /* NOTE: Default catch all signal is SIGSTOP. */
-    return SIGSTOP;
-#else
-    /* Need to implement full logic for RISC-V */
-    /* NOTE: Default catch all signal is SIGSTOP. */
-    return SIGSTOP;
-#endif  
-}
 
 
 static void displayHardFaultCauseToGdbConsole(void);
@@ -936,6 +882,11 @@ static void checkStack(void)
 #endif  
 }
 
+
+int Platform_CommSharingWithApplication(void)
+{
+  return 0;
+}
 
 uint32_t Platform_GetProgramCounter(void)
 {

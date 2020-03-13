@@ -24,8 +24,6 @@
 #include <gdb_console.h>
 #include "riscv.h"
 
-#define DISABLE_APPARENTLY_ARM_SPECIFIC_CODE 1
-
 #if defined ( __GNUC__ )
   #define __ASM            __asm                                      /*!< asm keyword for GNU Compiler          */
   #define __INLINE         inline                                     /*!< inline keyword for GNU Compiler       */
@@ -38,6 +36,7 @@ extern int errno;
 
 RiscVState    __mriRiscVState;
 
+#define DISABLE_APPARENTLY_ARM_SPECIFIC_CODE 1
 
 /* NOTE: This is the original version of the following XML which has had things stripped to reduce the amount of
          FLASH consumed by the debug monitor.  This includes the removal of the copyright comment.
@@ -132,20 +131,14 @@ void __mriExceptionHandler(void);
 
 
 static void clearState(void);
-static void configureDWTandFPB(void);
-static void defaultSvcAndSysTickInterruptsToPriority1(void);
-static void clearMonitorPending(void);
-static void enableDebugMonitorAtPriority0(void);
 static void disableSingleStep(void);
 static void enableSingleStep(void);
 static uint32_t getCurrentlyExecutingExceptionNumber(void);
+static int isInstruction32Bit(uint16_t firstWordOfInstruction);
+static uint16_t getFirstHalfWordOfCurrentInstruction(void);
 
 
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static void enableMPU(void);
-#endif
-  
 void __mriRiscVInit(Token* pParameterTokens)
 {
 
@@ -155,20 +148,9 @@ void __mriRiscVInit(Token* pParameterTokens)
     (void)pParameterTokens;
 
     clearState();
-    configureDWTandFPB();
-    defaultSvcAndSysTickInterruptsToPriority1();
     Platform_DisableSingleStep();
-    clearMonitorPending();
-    enableDebugMonitorAtPriority0();
 }
 
-
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static void enableMPU(void)
-{
-}
-#endif
 
 
 static __INLINE int isMPUNotPresent(void)
@@ -221,10 +203,6 @@ static __INLINE void setMPURegionAttributeAndSize(uint32_t attributeAndSize)
     if (isMPUNotPresent())
         return;
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    MPU->RASR = attributeAndSize;    
-#else
-#endif  
 }
 
 static __INLINE uint32_t getMPURegionAttributeAndSize(void)
@@ -232,53 +210,92 @@ static __INLINE uint32_t getMPURegionAttributeAndSize(void)
     if (isMPUNotPresent())
         return 0;
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return MPU->RASR;    
-#else
-#endif  
 }
 
 
-static void clearMonitorPending(void)
+static void setRiscVExecutionTrigger(int idx, uint32_t addr)
 {
-    // RESOLVE - not sure this is even relevant for RISC-V.
-    // If it is, then TODO: implement
+  volatile uint32_t idxVal = idx;
+  volatile uint32_t tdata1Val;
+  volatile uint32_t addrVal = addr;
+
+  /*
+    Bit 19 should be 0 (match virtual address)
+    bits 16 and 17 should be 0 (sizelo = 0, meaning any sized access)
+    action (bits 12 - 15) should be zero (break exception)
+    chain = 0
+    match = 0
+    m=1
+    s=1
+    u=1
+    execute=1
+    store=0
+    load=0
+
+    So basically OR in 0b101_1100 or 0x5C
+  */  
+  
+    __asm volatile ("csrw tselect, %0" : : "r" (idxVal));
+    __asm volatile ("csrw tdata2, %0" : : "r" (addrVal));    
+    __asm volatile ("csrr %0, tdata1" : "=r"(tdata1Val) : );
+    tdata1Val |= 0x5C;
+    __asm volatile ("csrw tdata1, %0" : : "r" (tdata1Val));    
 }
 
-static void enableDebugMonitorAtPriority0(void)
+static void clearRiscVExecutionTrigger(int idx)
 {
-    // RESOLVE - not sure this is even relevant for RISC-V.
-    // If it is, then TODO: implement
+  volatile uint32_t idxVal = idx;
+  volatile uint32_t tdata1Val;  
+
+  /* RISC-V triggers don't really have a "clear", but setting m, s, and u to 0,
+     or setting execute, load, and store to 0 will make the trigger a no-op.
+     We'll do both.  So, set bits 6..0 to 0 */
+    __asm volatile ("csrw tselect, %0" : : "r" (idxVal));
+    __asm volatile ("csrr %0, tdata1" : "=r"(tdata1Val) : );
+    tdata1Val &= ~0x7F;
+    __asm volatile ("csrw tdata1, %0" : : "r" (tdata1Val));    
 }
 
 static void disableSingleStep(void)
 {
-  // RESOLVE - implement
+  // Clear the execution trigger
+    clearRiscVExecutionTrigger(0);  
 }
 
 static void enableSingleStep(void)
 {
-  // RESOLVE - implement  
-}
+  // For now, we'll assume there is at least one RISC-V execution trigger available
+  // and we'll use that to set a temporary breakpoint on where we expect the pc to move
+  // after the current instruction.
+    uint16_t firstWordOfCurrentInstruction;
+    RISCV_X_VAL addrToBreakOn;
+    
+    __try
+    {
+        firstWordOfCurrentInstruction = getFirstHalfWordOfCurrentInstruction();
+    }
+    __catch
+    {
+        /* Will get here if PC isn't pointing to valid memory so treat as other. */
+        clearExceptionCode();
+        return;
+    }
 
+    /* The calculation of addressToBreakOn needs to be generalized to handle
+       control flow instructions.  This is just the easy case for initial experimentation. */
+    if (isInstruction32Bit(firstWordOfCurrentInstruction))
+    {
+        /* 32-bit Instruction. */
+	addrToBreakOn = __mriRiscVState.context.mepc + 4;
+    }
+    else
+    {
+        /* 16-bit Instruction. */      
+	addrToBreakOn = __mriRiscVState.context.mepc + 2;	
+    }
 
-static void configureDWTandFPB(void)
-{
-    /* ARM-specific?
-  
-    enableDWTandITM();
-    initDWT();
-    initFPB();
-    */
-}
-
-static void defaultSvcAndSysTickInterruptsToPriority1(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    NVIC_SetPriority(SVCall_IRQn, 1);
-    NVIC_SetPriority(PendSV_IRQn, 1);
-    NVIC_SetPriority(SysTick_IRQn, 1);
-#endif
+    // set an execution trigger
+    setRiscVExecutionTrigger(0, addrToBreakOn);
 }
 
 
@@ -291,263 +308,49 @@ void Platform_DisableSingleStep(void)
 
 static void clearSingleSteppingFlag(void)
 {
-  // RESOLVE - implement
+  __mriRiscVState.flags &= ~MRI_RISCV_FLAG_SINGLE_STEPPING;
 }
 
 
-static int      doesPCPointToSVCInstruction(void);
-static void     setHardwareBreakpointOnSvcHandler(void);
 //static uint32_t getNvicVector(IRQn_Type irq);
-static void     setSvcStepFlag(void);
 static void     setSingleSteppingFlag(void);
 static void     setSingleSteppingFlag(void);
-static void     recordCurrentBasePriorityAndSwitchToPriority1(void);
-static uint16_t getFirstHalfWordOfCurrentInstruction(void);
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static int      doesPCPointToBASEPRIUpdateInstruction(void);
-static uint16_t throwingMemRead16(uint32_t address);
-static uint16_t getSecondHalfWordOfCurrentInstruction(void);
-static int      isFirstHalfWordOfMSR(uint16_t instructionHalfWord0);
-static int      isSecondHalfWordOfMSRModifyingBASEPRI(uint16_t instructionHalfWord1);
-static int      isSecondHalfWordOfMSR_BASEPRI(uint16_t instructionHalfWord1);
-static int      isSecondHalfWordOfMSR_BASEPRI_MAX(uint16_t instructionHalfWord1);
-static void     setRestoreBasePriorityFlag(void);
-static void     recordCurrentBasePriority(void);
-static uint32_t calculateBasePriorityForThisCPU(uint32_t basePriority);
-#endif
+
 
 void Platform_EnableSingleStep(void)
 {
-    if (!doesPCPointToSVCInstruction())
-    {
-        setSingleSteppingFlag();
-        recordCurrentBasePriorityAndSwitchToPriority1();
-        enableSingleStep();
-        return;
-    }
-    
-    __try
-    {
-        __throwing_func( setHardwareBreakpointOnSvcHandler() );
-        setSvcStepFlag();
-    }
-    __catch
-    {
-        /* Failed to set hardware breakpoint so single step without modifying priority since the priority
-           elevation leads SVC to escalate to Hard Fault. */
-        clearExceptionCode();
-        setSingleSteppingFlag();
-        enableSingleStep();
-    }
-    return;
+  setSingleSteppingFlag();
+  enableSingleStep();
 }
 
-static int doesPCPointToSVCInstruction(void)
-{
-    static const uint16_t svcMachineCodeMask = 0xff00;
-    static const uint16_t svcMachineCode = 0xdf00;
-    uint16_t              instructionWord;
-    
-    __try
-    {
-        instructionWord = getFirstHalfWordOfCurrentInstruction();
-    }
-    __catch
-    {
-        clearExceptionCode();
-        return 0;
-    }
-    
-    return ((instructionWord & svcMachineCodeMask) == svcMachineCode);
-}
 
-static void setHardwareBreakpointOnSvcHandler(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE  
-    Platform_SetHardwareBreakpoint(getNvicVector(SVCall_IRQn) & ~1, 2);
-#endif  
-}
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static uint32_t getNvicVector(IRQn_Type irq)
-{
-    const uint32_t           nvicBaseVectorOffset = 16;
-    volatile const uint32_t* pVectors = (volatile const uint32_t*)SCB->VTOR;
-    return pVectors[irq + nvicBaseVectorOffset];
-}
-#endif  
-
-static void setSvcStepFlag(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.flags |= CORTEXM_FLAGS_SVC_STEP;  
-#endif  
-}
 
 static void setSingleSteppingFlag(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.flags |= CORTEXM_FLAGS_SINGLE_STEPPING;  
-#endif  
+  __mriRiscVState.flags |= MRI_RISCV_FLAG_SINGLE_STEPPING;
 }
 
-static void recordCurrentBasePriorityAndSwitchToPriority1(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    if (!doesPCPointToBASEPRIUpdateInstruction())
-        recordCurrentBasePriority();
-    __set_BASEPRI(calculateBasePriorityForThisCPU(1));
-#endif  
-}
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static int doesPCPointToBASEPRIUpdateInstruction(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    uint16_t firstWord = 0;
-    uint16_t secondWord = 0;
-    
-    __try
-    {
-        __throwing_func( firstWord = getFirstHalfWordOfCurrentInstruction() );
-        __throwing_func( secondWord = getSecondHalfWordOfCurrentInstruction() );
-    }
-    __catch
-    {
-        clearExceptionCode();
-        return 0;
-    }
-    
-    return isFirstHalfWordOfMSR(firstWord) && isSecondHalfWordOfMSRModifyingBASEPRI(secondWord);
-#else
-  return 0;    
-#endif
-}
-#endif
-
-static uint16_t getFirstHalfWordOfCurrentInstruction(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return throwingMemRead16(__mriCortexMState.context.PC);  
-#else
-  return 0; /* implement, if we need to */  
-#endif  
-}
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static uint16_t getSecondHalfWordOfCurrentInstruction(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return throwingMemRead16(__mriCortexMState.context.PC + sizeof(uint16_t));  
-#else
-    return 0; /* implement, if we need to */  
-#endif  
-}
-#endif
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
 static uint16_t throwingMemRead16(uint32_t address)
 {
-  uint16_t instructionWord = Platform_MemRead16((const uint16_t*)(intptr_t)address);
+    uint16_t instructionWord = Platform_MemRead16((const uint16_t*)address);
     if (Platform_WasMemoryFaultEncountered())
         __throw_and_return(memFaultException, 0);
     return instructionWord;
 }
-#endif
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static int isFirstHalfWordOfMSR(uint16_t instructionHalfWord0)
+
+static uint16_t getFirstHalfWordOfCurrentInstruction(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    static const unsigned short MSRMachineCode = 0xF380;
-    static const unsigned short MSRMachineCodeMask = 0xFFF0;
-
-    return MSRMachineCode == (instructionHalfWord0 & MSRMachineCodeMask);
-#else
-    return 0;    
-#endif  
+    return throwingMemRead16(__mriRiscVState.context.mepc);  
 }
-#endif
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static int isSecondHalfWordOfMSRModifyingBASEPRI(uint16_t instructionHalfWord1)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return isSecondHalfWordOfMSR_BASEPRI(instructionHalfWord1) ||
-           isSecondHalfWordOfMSR_BASEPRI_MAX(instructionHalfWord1);
-#else
-    return 0;    
-#endif  
-}
-#endif
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static int isSecondHalfWordOfMSR_BASEPRI(uint16_t instructionHalfWord1)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    static const unsigned short BASEPRIMachineCode = 0x8811;
-
-    return instructionHalfWord1 == BASEPRIMachineCode;
-#else
-    return 0;    
-#endif  
-}
-#endif
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static int isSecondHalfWordOfMSR_BASEPRI_MAX(uint16_t instructionHalfWord1)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    static const unsigned short BASEPRI_MAXMachineCode = 0x8812;
-
-    return instructionHalfWord1 == BASEPRI_MAXMachineCode;
-#else
-    return 0;  
-#endif  
-}
-#endif
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static void recordCurrentBasePriority(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.originalBasePriority = __get_BASEPRI();
-    setRestoreBasePriorityFlag();
-#else
-#endif  
-}
-#endif
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static void setRestoreBasePriorityFlag(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    __mriCortexMState.flags |= CORTEXM_FLAGS_RESTORE_BASEPRI;  
-#else
-#endif  
-}
-#endif
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static uint32_t calculateBasePriorityForThisCPU(uint32_t basePriority)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    /* Different Cortex-M3 chips support different number of bits in the priority register. */
-    return ((basePriority << (8 - __NVIC_PRIO_BITS)) & 0xff);
-#else
-    return 0;
-#endif  
-}
-#endif
 
 int Platform_IsSingleStepping(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return __mriCortexMState.flags & CORTEXM_FLAGS_SINGLE_STEPPING;  
-#else
-    return 0; // implement for RISC-V
-#endif  
+    return __mriRiscVState.flags & MRI_RISCV_FLAG_SINGLE_STEPPING;    
 }
 
 
@@ -589,6 +392,7 @@ static void displayBusFaultCauseToGdbConsole(void);
 static void displayUsageFaultCauseToGdbConsole(void);
 void Platform_DisplayFaultCauseToGdbConsole(void)
 {
+  return;
     switch (getCurrentlyExecutingExceptionNumber())
     {
     case 3:
@@ -615,7 +419,7 @@ void Platform_DisplayFaultCauseToGdbConsole(void)
 
 static void displayHardFaultCauseToGdbConsole(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
+#if 0
     static const uint32_t debugEventBit = 1 << 31;
     static const uint32_t forcedBit = 1 << 30;
     static const uint32_t vectorTableReadBit = 1 << 1;
@@ -638,14 +442,13 @@ static void displayHardFaultCauseToGdbConsole(void)
         displayBusFaultCauseToGdbConsole();
         displayUsageFaultCauseToGdbConsole();
     }
-#else
 #endif  
   
 }
 
 static void displayMemFaultCauseToGdbConsole(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
+#if 0
     static const uint32_t MMARValidBit = 1 << 7;
     static const uint32_t FPLazyStatePreservationBit = 1 << 5;
     static const uint32_t stackingErrorBit = 1 << 4;
@@ -685,99 +488,16 @@ static void displayMemFaultCauseToGdbConsole(void)
 
     if (memManageFaultStatusRegister & instructionFetch)
         WriteStringToGdbConsole("\n    Instruction Fetch");
-#else
 #endif  
 }
 
 static void displayBusFaultCauseToGdbConsole(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    static const uint32_t BFARValidBit = 1 << 7;
-    static const uint32_t FPLazyStatePreservationBit = 1 << 5;
-    static const uint32_t stackingErrorBit = 1 << 4;
-    static const uint32_t unstackingErrorBit = 1 << 3;
-    static const uint32_t impreciseDataAccessBit = 1 << 2;
-    static const uint32_t preciseDataAccessBit = 1 << 1;
-    static const uint32_t instructionPrefetch = 1;
-    uint32_t              busFaultStatusRegister = (SCB->CFSR >> 8) & 0xFF;
-    
-    /* Check to make sure that there is a bus fault to display. */
-    if (busFaultStatusRegister == 0)
-        return;
-    
-    WriteStringToGdbConsole("\n**Bus Fault**");
-    WriteStringToGdbConsole("\n  Status Register: ");
-    WriteHexValueToGdbConsole(busFaultStatusRegister);
-    
-    if (busFaultStatusRegister & BFARValidBit)
-    {
-        WriteStringToGdbConsole("\n    Fault Address: ");
-        WriteHexValueToGdbConsole(SCB->BFAR);
-    }
-    if (busFaultStatusRegister & FPLazyStatePreservationBit)
-        WriteStringToGdbConsole("\n    FP Lazy Preservation");
-
-    if (busFaultStatusRegister & stackingErrorBit)
-    {
-        WriteStringToGdbConsole("\n    Stacking Error w/ SP = ");
-        WriteHexValueToGdbConsole(__mriCortexMState.taskSP);
-    }
-    if (busFaultStatusRegister & unstackingErrorBit)
-    {
-        WriteStringToGdbConsole("\n    Unstacking Error w/ SP = ");
-        WriteHexValueToGdbConsole(__mriCortexMState.taskSP);
-    }
-    if (busFaultStatusRegister & impreciseDataAccessBit)
-        WriteStringToGdbConsole("\n    Imprecise Data Access");
-
-    if (busFaultStatusRegister & preciseDataAccessBit)
-        WriteStringToGdbConsole("\n    Precise Data Access");
-
-    if (busFaultStatusRegister & instructionPrefetch)
-        WriteStringToGdbConsole("\n    Instruction Prefetch");
-#else
-#endif  
   
 }
 
 static void displayUsageFaultCauseToGdbConsole(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    static const uint32_t divideByZeroBit = 1 << 9;
-    static const uint32_t unalignedBit = 1 << 8;
-    static const uint32_t coProcessorAccessBit = 1 << 3;
-    static const uint32_t invalidPCBit = 1 << 2;
-    static const uint32_t invalidStateBit = 1 << 1;
-    static const uint32_t undefinedInstructionBit = 1;
-    uint32_t              usageFaultStatusRegister = SCB->CFSR >> 16;
-    
-    /* Make sure that there is a usage fault to display. */
-    if (usageFaultStatusRegister == 0)
-        return;
-    
-    WriteStringToGdbConsole("\n**Usage Fault**");
-    WriteStringToGdbConsole("\n  Status Register: ");
-    WriteHexValueToGdbConsole(usageFaultStatusRegister);
-    
-    if (usageFaultStatusRegister & divideByZeroBit)
-        WriteStringToGdbConsole("\n    Divide by Zero");
-
-    if (usageFaultStatusRegister & unalignedBit)
-        WriteStringToGdbConsole("\n    Unaligned Access");
-
-    if (usageFaultStatusRegister & coProcessorAccessBit)
-        WriteStringToGdbConsole("\n    Coprocessor Access");
-
-    if (usageFaultStatusRegister & invalidPCBit)
-        WriteStringToGdbConsole("\n    Invalid Exception Return State");
-
-    if (usageFaultStatusRegister & invalidStateBit)
-        WriteStringToGdbConsole("\n    Invalid State");
-
-    if (usageFaultStatusRegister & undefinedInstructionBit)
-        WriteStringToGdbConsole("\n    Undefined Instruction");
-#else
-#endif  
   
 }
 
@@ -789,10 +509,6 @@ static void displayUsageFaultCauseToGdbConsole(void)
 
 
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static void     clearRestoreBasePriorityFlag(void);
-static uint32_t shouldRestoreBasePriority(void);
-#endif
 
 
 
@@ -803,23 +519,6 @@ static uint32_t shouldRestoreBasePriority(void);
 
 
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE  
-static uint32_t shouldRestoreBasePriority(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE  
-    return __mriCortexMState.flags & CORTEXM_FLAGS_RESTORE_BASEPRI;
-#else
-    return 0;
-#endif
-}
-#endif
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static void clearRestoreBasePriorityFlag(void)
-{
-    __mriCortexMState.flags &= ~CORTEXM_FLAGS_RESTORE_BASEPRI;  
-}
-#endif
 
 
 
@@ -842,32 +541,17 @@ void __mriPlatform_LeavingDebuggerHook(void)
 }
 
 
-static void restoreMPUConfiguration(void);
 static void checkStack(void);
 void Platform_LeavingDebugger(void)
 {
-    restoreMPUConfiguration();
     checkStack();
-    clearMonitorPending();
     __mriRiscVState.flags |= MRI_RISCV_FLAG_EXITING;
 }
 
-static void restoreMPUConfiguration(void)
-{
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    disableMPU();
-    prepareToAccessMPURegion(getHighestMPUDataRegionIndex());
-    setMPURegionAddress(__mriCortexMState.originalMPURegionAddress);
-    setMPURegionAttributeAndSize(__mriCortexMState.originalMPURegionAttributesAndSize);
-    prepareToAccessMPURegion(__mriCortexMState.originalMPURegionNumber);
-    setMPUControlValue(__mriCortexMState.originalMPUControlValue);
-#else
-#endif  
-}
 
 static void checkStack(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
+#if 0
     uint32_t* pCurr = (uint32_t*)__mriCortexMState.debuggerStack;
     uint8_t*  pEnd = (uint8_t*)__mriCortexMState.debuggerStack + sizeof(__mriCortexMState.debuggerStack);
     int       spaceUsed;
@@ -878,7 +562,6 @@ static void checkStack(void)
     spaceUsed = pEnd - (uint8_t*)pCurr;
     if (spaceUsed > __mriCortexMState.maxStackUsed)
         __mriCortexMState.maxStackUsed = spaceUsed;
-#else
 #endif  
 }
 
@@ -920,45 +603,27 @@ void Platform_AdvanceProgramCounterToNextInstruction(void)
     if (isInstruction32Bit(firstWordOfCurrentInstruction))
     {
         /* 32-bit Instruction. */
-
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-        __mriCortexMState.context.PC += 4;      
-#else
-#endif  
+	__mriRiscVState.context.mepc += 4;
     }
     else
     {
         /* 16-bit Instruction. */      
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-        __mriCortexMState.context.PC += 2;      
-#else
-#endif  
+	__mriRiscVState.context.mepc += 2;	
     }
 }
 
 static int isInstruction32Bit(uint16_t firstWordOfInstruction)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    uint16_t maskedOffUpper5BitsOfWord = firstWordOfInstruction & 0xF800;
+    uint16_t maskedOffLower2BitsOfWord = firstWordOfInstruction & 0x3;
     
-    /* 32-bit instructions start with 0b11101, 0b11110, 0b11111 according to page A5-152 of the 
-       ARMv7-M Architecture Manual. */
-    return  (maskedOffUpper5BitsOfWord == 0xE800 ||
-             maskedOffUpper5BitsOfWord == 0xF000 ||
-             maskedOffUpper5BitsOfWord == 0xF800);
-#else
-    return 1; /* implement correctly for RISC-V */
-#endif  
+    /* 32-bit have binary 11 in lowest bits */
+    return  (maskedOffLower2BitsOfWord == 0x3);
 }
 
 
 int Platform_WasProgramCounterModifiedByUser(void)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    return __mriCortexMState.context.PC != __mriCortexMState.originalPC;  
-#else
-    return 0; /* implement correctly for RISC-V */
-#endif  
+    return __mriRiscVState.context.mepc != __mriRiscVState.originalPC;      
 }
 
 
@@ -1015,25 +680,18 @@ static int isInstructionHardcodedBreakpoint(uint16_t instruction)
 PlatformSemihostParameters Platform_GetSemihostCallParameters(void)
 {
     PlatformSemihostParameters parameters;  
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    parameters.parameter1 = __mriCortexMState.context.R0;
-    parameters.parameter2 = __mriCortexMState.context.R1;
-    parameters.parameter3 = __mriCortexMState.context.R2;
-    parameters.parameter4 = __mriCortexMState.context.R3;
-#else
     parameters.parameter1 = 0;
     parameters.parameter2 = 0;
     parameters.parameter3 = 0;
     parameters.parameter4 = 0;
     // implement appropriately for RISC-V
-#endif  
     return parameters;  
 }
 
 
 void Platform_SetSemihostCallReturnAndErrnoValues(int returnValue, int err)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
+#if 0
     __mriCortexMState.context.R0 = returnValue;  
 #else
     // implement for RISC-V

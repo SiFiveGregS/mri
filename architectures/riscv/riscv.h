@@ -13,6 +13,7 @@ typedef uint64_t RISCV_X_VAL;
 #define MRI_RISCV_FLAG_DEBUGGER_ACTIVE (1 << 0)      /* Is the debugger in control? 1=yes, 0=no */
 #define MRI_RISCV_FLAG_EXITING (1 << 1)    /* Is the debugger exiting back to the state prior to initial debugger entry? */
 #define MRI_RISCV_FLAG_REENTERED (1 << 2)  /* Has the debugger been re-entered (and thus, are the reentered_* fields valid? */
+#define MRI_RISCV_FLAG_SINGLE_STEPPING (1 << 3)    /* Is the debugger in the process of driving a single step? */
 
 typedef struct {
   RISCV_X_VAL x_1_31[31];  // Not including x0!  Its value is fixed at zero always, of course.
@@ -21,7 +22,7 @@ typedef struct {
   RISCV_X_VAL mstatus;  
   RISCV_X_VAL reentered_mepc;
   RISCV_X_VAL reentered_mcause;
-  RISCV_X_VAL reentered_mstatus;  
+  RISCV_X_VAL reentered_mstatus;
 } MRI_CONTEXT_RISCV;
 
 
@@ -40,6 +41,7 @@ typedef struct
 {
     volatile uint32_t   flags;
     MRI_CONTEXT_RISCV   context;
+    RISCV_X_VAL         originalPC;  
     char                packetBuffer[RISCV_PACKET_BUFFER_SIZE];
 } RiscVState;
 

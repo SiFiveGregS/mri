@@ -143,7 +143,7 @@ void riscv_inst_decode(uint32_t inst, INST_DECODE_INFO *info)
       ((BITS(inst, 12, 1)) << 8), 8);
   } else {
     info->op = INST_OP_UNSPECIFIED;
-    info->length = ((inst & 0x3) == 0x3) ? 32 : 16;
+    info->length = ((inst & 0x3) == 0x3) ? 4 : 2;
   }
 }
 

@@ -23,6 +23,7 @@
 #include <platforms.h>
 #include <gdb_console.h>
 #include "riscv.h"
+#include "riscv_inst.h"
 
 #if defined ( __GNUC__ )
   #define __ASM            __asm                                      /*!< asm keyword for GNU Compiler          */
@@ -135,7 +136,7 @@ static void disableSingleStep(void);
 static void enableSingleStep(void);
 static uint32_t getCurrentlyExecutingExceptionNumber(void);
 static int isInstruction32Bit(uint16_t firstWordOfInstruction);
-static uint16_t getFirstHalfWordOfCurrentInstruction(void);
+static uint16_t getHalfWord(uint32_t address);
 
 
 
@@ -268,11 +269,16 @@ static void enableSingleStep(void)
   // and we'll use that to set a temporary breakpoint on where we expect the pc to move
   // after the current instruction.
     uint16_t firstWordOfCurrentInstruction;
+    uint16_t secondWordOfCurrentInstruction;    
     RISCV_X_VAL addrToBreakOn;
+    uint32_t inst32;
+    RISCV_X_UNSIGNED gprs[32];
+    int i;
     
     __try
     {
-        firstWordOfCurrentInstruction = getFirstHalfWordOfCurrentInstruction();
+        firstWordOfCurrentInstruction = getHalfWord(__mriRiscVState.context.mepc);
+        secondWordOfCurrentInstruction = getHalfWord(__mriRiscVState.context.mepc + 2);	
     }
     __catch
     {
@@ -281,18 +287,14 @@ static void enableSingleStep(void)
         return;
     }
 
-    /* The calculation of addressToBreakOn needs to be generalized to handle
-       control flow instructions.  This is just the easy case for initial experimentation. */
-    if (isInstruction32Bit(firstWordOfCurrentInstruction))
-    {
-        /* 32-bit Instruction. */
-	addrToBreakOn = __mriRiscVState.context.mepc + 4;
+    inst32 = (secondWordOfCurrentInstruction << 16) | firstWordOfCurrentInstruction;
+
+    gprs[0] = 0;
+    for (i = 1; i <= 31; i++) {
+      gprs[i] = __mriRiscVState.context.x_1_31[i-1];
     }
-    else
-    {
-        /* 16-bit Instruction. */      
-	addrToBreakOn = __mriRiscVState.context.mepc + 2;	
-    }
+
+    addrToBreakOn = riscv_next_pc(__mriRiscVState.context.mepc, inst32, gprs);    
 
     // set an execution trigger
     setRiscVExecutionTrigger(0, addrToBreakOn);
@@ -341,11 +343,10 @@ static uint16_t throwingMemRead16(uint32_t address)
 }
 
 
-static uint16_t getFirstHalfWordOfCurrentInstruction(void)
+static uint16_t getHalfWord(uint32_t address)
 {
-    return throwingMemRead16(__mriRiscVState.context.mepc);  
+  return throwingMemRead16(address);
 }
-
 
 
 int Platform_IsSingleStepping(void)
@@ -591,7 +592,7 @@ void Platform_AdvanceProgramCounterToNextInstruction(void)
     
     __try
     {
-        firstWordOfCurrentInstruction = getFirstHalfWordOfCurrentInstruction();
+        firstWordOfCurrentInstruction = getHalfWord(__mriRiscVState.context.mepc);
     }
     __catch
     {
@@ -636,7 +637,7 @@ PlatformInstructionType Platform_TypeOfCurrentInstruction(void)
     
     __try
     {
-        currentInstruction = getFirstHalfWordOfCurrentInstruction();
+      currentInstruction = getHalfWord(__mriRiscVState.context.mepc);
     }
     __catch
     {

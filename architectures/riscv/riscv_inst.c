@@ -154,9 +154,6 @@ int riscv_inst_length(uint32_t inst)
 
 uint32_t riscv_next_pc(uint32_t pc_cur, uint32_t inst, RISCV_X_UNSIGNED *gprs)
 {
-  int foundmatch = 0;
-  uint32_t next;
-  int32_t snext;  
   INST_DECODE_INFO info;
 
   riscv_inst_decode(inst, &info);

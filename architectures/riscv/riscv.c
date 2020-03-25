@@ -37,6 +37,21 @@ extern int errno;
 
 RiscVState    __mriRiscVState;
 
+/* trigger free list and allocated list are singly-linked lists, NULL terminated */
+typedef struct RiscVTrigger RISCV_TRIGGER;
+struct RiscVTrigger {
+  int idx;
+  int allocated;
+  int programmed;
+  uint32_t addr;
+};
+
+#define MAX_TRIGGERS 16
+RISCV_TRIGGER triggerPool[MAX_TRIGGERS];
+int triggerMaxValid;  /* actually "one beyond the max valid trigger index" */
+
+static RISCV_TRIGGER *triggerForSingleStep;
+
 #define DISABLE_APPARENTLY_ARM_SPECIFIC_CODE 1
 
 /* NOTE: This is the original version of the following XML which has had things stripped to reduce the amount of
@@ -132,24 +147,33 @@ void __mriExceptionHandler(void);
 
 
 static void clearState(void);
+static void initSingleStep(void);
 static void disableSingleStep(void);
 static void enableSingleStep(void);
 static uint32_t getCurrentlyExecutingExceptionNumber(void);
 static int isInstruction32Bit(uint16_t firstWordOfInstruction);
 static uint16_t getHalfWord(uint32_t address);
-
+static void triggersInit();
+static int triggersIsValidIdx(uint32_t idx);
+static RISCV_TRIGGER *triggerAlloc(uint32_t addr);
+static void triggerSetAddr(RISCV_TRIGGER *t, uint32_t addr);
+static RISCV_TRIGGER *triggerFindByAddr(uint32_t addr);
+static void triggerProgramHw(RISCV_TRIGGER *t);
+static void triggerClearHw(RISCV_TRIGGER *t);
+static void triggerFree(RISCV_TRIGGER *t);
 
 
 void __mriRiscVInit(Token* pParameterTokens)
 {
 
     /* Reference routine in ASM module to make sure that is gets linked in. */
-    void (* volatile dummyReference)(void) = __mriExceptionHandler;
-    (void)dummyReference;
     (void)pParameterTokens;
 
     clearState();
     Platform_DisableSingleStep();
+    triggersInit();
+    initSingleStep();  /* Must happen after triggersInit, for implementation reasons, */
+                       /* because it is using an execution trigger internally */
 }
 
 
@@ -214,11 +238,35 @@ static __INLINE uint32_t getMPURegionAttributeAndSize(void)
 }
 
 
-static void setRiscVExecutionTrigger(int idx, uint32_t addr)
+static void triggerSetAddr(RISCV_TRIGGER *trigger, uint32_t addr)
 {
-  volatile uint32_t idxVal = idx;
+  if (trigger) {
+    trigger->addr = addr;
+  }
+}
+
+static RISCV_TRIGGER *triggerFindByAddr(uint32_t addr)
+{
+  int i;
+  
+  for (i = 0; i < triggerMaxValid; i++)
+    if (triggerPool[i].allocated && triggerPool[i].addr == addr)
+      return &triggerPool[i];
+
+  return NULL;
+}
+
+static void triggerProgramHw(RISCV_TRIGGER *trigger)
+{
+  volatile uint32_t idxVal;
   volatile uint32_t tdata1Val;
-  volatile uint32_t addrVal = addr;
+  volatile uint32_t addrVal;
+
+  if (trigger == NULL)
+    return;
+  
+  idxVal = trigger->idx;
+  addrVal = trigger->addr;
 
   /*
     Bit 19 should be 0 (match virtual address)
@@ -240,13 +288,18 @@ static void setRiscVExecutionTrigger(int idx, uint32_t addr)
     __asm volatile ("csrw tdata2, %0" : : "r" (addrVal));    
     __asm volatile ("csrr %0, tdata1" : "=r"(tdata1Val) : );
     tdata1Val |= 0x5C;
-    __asm volatile ("csrw tdata1, %0" : : "r" (tdata1Val));    
+    __asm volatile ("csrw tdata1, %0" : : "r" (tdata1Val));
+
+    trigger->programmed = 1;
 }
 
-static void clearRiscVExecutionTrigger(int idx)
+static void triggerClearHw(RISCV_TRIGGER *trigger)
 {
-  volatile uint32_t idxVal = idx;
-  volatile uint32_t tdata1Val;  
+  volatile uint32_t idxVal = trigger->idx;
+  volatile uint32_t tdata1Val;
+
+  if (trigger == NULL)
+    return;
 
   /* RISC-V triggers don't really have a "clear", but setting m, s, and u to 0,
      or setting execute, load, and store to 0 will make the trigger a no-op.
@@ -254,13 +307,27 @@ static void clearRiscVExecutionTrigger(int idx)
     __asm volatile ("csrw tselect, %0" : : "r" (idxVal));
     __asm volatile ("csrr %0, tdata1" : "=r"(tdata1Val) : );
     tdata1Val &= ~0x7F;
-    __asm volatile ("csrw tdata1, %0" : : "r" (tdata1Val));    
+    __asm volatile ("csrw tdata1, %0" : : "r" (tdata1Val));
+
+    /* Might as well clear the "programmed" field which can help debugging this debugger
+       (in conjunction with NOT clearing the address field so we can see which address was
+       most recently used for this trigger slot) */
+    trigger->programmed = 0;
+}
+
+
+static void initSingleStep(void)
+{
+  triggerForSingleStep = triggerAlloc(0 /* placeholder address for now */);
 }
 
 static void disableSingleStep(void)
 {
-  // Clear the execution trigger
-    clearRiscVExecutionTrigger(0);  
+    // Clear execution trigger we're  using internally for single step
+    if (triggerForSingleStep != NULL) {
+      triggerClearHw(triggerForSingleStep);      
+    }
+    
 }
 
 static void enableSingleStep(void)
@@ -297,7 +364,11 @@ static void enableSingleStep(void)
     addrToBreakOn = riscv_next_pc(__mriRiscVState.context.mepc, inst32, gprs);    
 
     // set an execution trigger
-    setRiscVExecutionTrigger(0, addrToBreakOn);
+    if (triggerForSingleStep != NULL) {
+      triggerSetAddr(triggerForSingleStep, addrToBreakOn);
+      triggerProgramHw(triggerForSingleStep);      
+    }
+
 }
 
 
@@ -778,37 +849,28 @@ static void readBytesFromBufferAsHex(Buffer* pBuffer, void* pBytes, size_t byteC
 }
 #endif
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-static int doesKindIndicate32BitInstruction(uint32_t kind);
-#endif
-
 void Platform_SetHardwareBreakpoint(uint32_t address, uint32_t kind)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    uint32_t* pFPBBreakpointComparator;
-    int       is32BitInstruction;
-    
-    __try
-        is32BitInstruction = doesKindIndicate32BitInstruction(kind);
-    __catch
-        __rethrow;
-        
-    pFPBBreakpointComparator = enableFPBBreakpoint(address, is32BitInstruction);
-    if (!pFPBBreakpointComparator)
+    RISCV_TRIGGER *trigger;
+
+    trigger = triggerAlloc(address);
+
+    if (trigger == NULL)
         __throw(exceededHardwareResourcesException);
-#else
-    // implement for RISC-V
-#endif  
+
+    triggerSetAddr(trigger, address);
+    triggerProgramHw(trigger);
 }
 
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
+#if 0  /* it appears this is unused for RISC-V, and generates a warnings-as-errors compilation error */
+static int doesKindIndicate32BitInstruction(uint32_t kind);
 static int doesKindIndicate32BitInstruction(uint32_t kind)
 {
     switch (kind)
     {
     case 2:
         return 0;
-    case 3:
+    case 3:  /* Not even sure if kind==3 is ever used for RISC-V; probably not, in which case this will do no harm */
     case 4:
         return 1;
     default:
@@ -819,18 +881,16 @@ static int doesKindIndicate32BitInstruction(uint32_t kind)
 
 void Platform_ClearHardwareBreakpoint(uint32_t address, uint32_t kind)
 {
-#ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE
-    int       is32BitInstruction;
-    
-    __try
-        is32BitInstruction = doesKindIndicate32BitInstruction(kind);
-    __catch
-        __rethrow;
-        
-    disableFPBBreakpointComparator(address, is32BitInstruction);
-#else
-    // implement for RISC-V
-#endif  
+  RISCV_TRIGGER *trigger;
+
+  trigger = triggerFindByAddr(address);
+  if (trigger != NULL) {
+    triggerClearHw(trigger);
+    triggerFree(trigger);
+  } else {
+    /* maybe send back an error code to GDB, but this should never happen unless there's a fundamental bug or "disconnect" */
+    /* Currently doing nothing */
+  }
 }
 
 #ifndef DISABLE_APPARENTLY_ARM_SPECIFIC_CODE  
@@ -894,4 +954,65 @@ uint32_t Platform_GetTargetXmlSize(void)
 const char* Platform_GetTargetXml(void)
 {
     return g_targetXml;
+}
+
+
+static void triggersInit()
+{
+  int i;
+
+  for (i = 0; i < MAX_TRIGGERS && triggersIsValidIdx(i); i++) {
+    triggerPool[i].idx = i;
+    triggerPool[i].allocated = 0;
+    triggerPool[i].programmed = 0;
+    triggerMaxValid = i+1;  /* max valid is really 'one beyond the max valid index' */
+  }
+}
+
+static void tselectWrite(uint32_t val)
+{
+  __asm volatile ("csrw tselect, %0" : : "r" (val));  
+}
+
+static uint32_t tselectRead(void)
+{
+  uint32_t tselect;
+  __asm volatile ("csrr %0, tselect" : "=r" (tselect) : );
+  return tselect;
+}
+
+static int triggersIsValidIdx(uint32_t idx)
+{
+  /* save tselect value */
+  /* try to set tselect to the given idx */
+  /* see if tselect reads back with what we wrote */
+  /* restore previous tselect value */
+  int retval;
+  
+  uint32_t tselect_original = tselectRead();
+  tselectWrite(idx);
+  retval = (tselectRead() == idx);
+  tselectWrite(tselect_original);  
+  return retval;
+}
+
+RISCV_TRIGGER *triggerAlloc(uint32_t addr)
+{
+  int i;
+  
+  for (i = 0; i < triggerMaxValid; i++) {
+    if (triggerPool[i].allocated == 0) {
+      triggerPool[i].allocated = 1;
+      triggerPool[i].addr = addr;
+      return &triggerPool[i];
+    }
+  }
+  return NULL;
+}
+
+void triggerFree(RISCV_TRIGGER *t)
+{
+  if (t) {
+    t->allocated = 0;
+  }
 }
